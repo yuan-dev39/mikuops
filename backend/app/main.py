@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import psutil
+import docker
 
 app = FastAPI()
 
@@ -31,3 +32,21 @@ def get_system_info():
         "memory_percent": memory.percent,
         "disk_percent": disk.percent
     }
+
+@app.get("/api/docker")
+def get_docker_containers():
+
+    client = docker.from_env()
+
+    containers = client.containers.list(all=True)
+
+    result = []
+
+    for container in containers:
+        result.append({
+            "name": container.name,
+            "status": container.status,
+            "image": container.image.tags
+        })
+
+    return result
