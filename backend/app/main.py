@@ -6,12 +6,21 @@ import psutil
 import requests
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response  # Prometheus用のレスポンスクラス
+
+# ---- 【第②步】Prometheus監視メトリクスのインポート ----
+from prometheus_client import Gauge, generate_latest
 
 # データベース設定、セッション、およびモデルのインポート
 from app.database import SessionLocal, engine
 from app.models import Base, Metric
 
 app = FastAPI()
+
+# ---- 【第③步】Prometheus監視メトリクスの初期化登録 ----
+cpu_gauge = Gauge("mikuops_cpu_usage", "CPU Usage Percent")
+memory_gauge = Gauge("mikuops_memory_usage", "Memory Usage Percent")
+disk_gauge = Gauge("mikuops_disk_usage", "Disk Usage Percent")
 
 # アプリケーション起動時にデータベース内にすべてのテーブルを自動作成
 Base.metadata.create_all(bind=engine)
@@ -32,13 +41,18 @@ def root():
     return {"message": "Welcome to MikuOps"}
 
 
-# 1. システムリソース監視API（データベース保存機能付き）
+# 1. システムリソース監視API（数据库保存 ＋ Prometheus注册）
 @app.get("/api/system")
 def get_system_info():
-    """CPU、メモリ、ディスクの使用率を取得し、データベースに保存した上でアラート判定を行うAPI"""
+    """CPU、メモリ、ディスクの使用率を取得し、各種監視システムに登録・保存した上でアラート判定を行うAPI"""
     cpu_usage = psutil.cpu_percent(interval=None)
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
+
+    # ---- 【第④步】Prometheusへリアルタイム値を登録 ----
+    cpu_gauge.set(cpu_usage)
+    memory_gauge.set(memory.percent)
+    disk_gauge.set(disk.percent)
 
     # ---- データベースへの保存処理 ----
     db = SessionLocal()  # データベースセッションを開始
@@ -127,7 +141,17 @@ def health_check():
     return results
 
 
-# 4. 監視履歴取得API（指定位置：@app.get("/api/health")の下に配置）
+# ---- 【第⑤步】Prometheus Exporter エンドポイント ----
+@app.get("/api/metrics")
+def metrics():
+    """Prometheusサーバーがデータをスクレイピングするための標準メトリクス出力API"""
+    return Response(
+        generate_latest(),
+        media_type="text/plain"
+    )
+
+
+# 4. 監視履歴取得API
 @app.get("/api/history")
 def get_history():
     """データベースから直近100件のメトリクス履歴を取得するAPI"""
