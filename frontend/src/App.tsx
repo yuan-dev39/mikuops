@@ -12,15 +12,17 @@ function App() {
   const [systemInfo, setSystemInfo] = useState<any>(null);
   const [cpuHistory, setCpuHistory] = useState<any[]>([]);
   const [containers, setContainers] = useState<any[]>([]);
+  const [logs, setLogs] = useState<string[]>([]);
 
+  // システム監視データおよびDockerコンテナ一覧を取得する関数
   const fetchSystemInfo = () => {
-    // システム監視データの取得
+    // 1. システムリソース情報の取得
     fetch("http://127.0.0.1:8000/api/system")
       .then((res) => res.json())
       .then((data) => {
         setSystemInfo(data);
 
-        // CPU履歴チャートの更新
+        // CPU履歴チャートの更新（直近10回分のデータを保持）
         setCpuHistory((prev) => {
           const newData = [
             ...prev,
@@ -29,26 +31,41 @@ function App() {
               cpu: data.cpu_percent,
             },
           ];
-
           return newData.slice(-10);
         });
-      });
+      })
+      .catch((err) => console.error("System API Error:", err));
 
-    // Dockerコンテナデータの取得
+    // 2. Dockerコンテナ一覧の取得
     fetch("http://127.0.0.1:8000/api/docker")
       .then((res) => res.json())
       .then((dockerData) => {
         setContainers(dockerData);
-      });
+      })
+      .catch((err) => console.error("Docker API Error:", err));
   };
 
   useEffect(() => {
+    // 初回レンダリング時にデータを取得
     fetchSystemInfo();
 
     // 3秒ごとにデータを定期更新（ポーリング）
     const interval = setInterval(fetchSystemInfo, 3000);
 
-    return () => clearInterval(interval);
+    // WebSocket接続の初期化（無限接続バグ防止のためuseEffect内に配置）
+    const ws = new WebSocket("ws://127.0.0.1:8000/ws/logs");
+
+    // バックエンドからログを受信したときの処理
+    ws.onmessage = (event) => {
+      // 直近の20行のログを画面に保持
+      setLogs((prev) => [...prev, event.data].slice(-20));
+    };
+
+    // コンポーネントがアンマウント（破棄）されたときのクリーンアップ処理
+    return () => {
+      clearInterval(interval);
+      ws.close(); // WebSocket接続を正しく切断
+    };
   }, []);
 
   return (
@@ -59,7 +76,20 @@ function App() {
 
       {systemInfo && (
         <>
-          {/* システム監視カード */}
+          {/* 0. アラート表示エリア（バックエンドからの警告/危険を日本語で検知） */}
+          {systemInfo.alert && (
+            <div
+              className={`mb-8 p-6 rounded-2xl shadow-lg text-white text-xl font-bold ${
+                systemInfo.status === "critical"
+                  ? "bg-red-600"
+                  : "bg-yellow-500"
+              }`}
+            >
+              🚨 {systemInfo.alert}
+            </div>
+          )}
+
+          {/* 1. システム監視メトリクスカード */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h2 className="text-xl font-semibold text-gray-600 mb-4">
@@ -89,7 +119,7 @@ function App() {
             </div>
           </div>
 
-          {/* CPU リアルタイムチャート */}
+          {/* 2. CPUリアルタイムモニタリングチャート */}
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
             <h2 className="text-2xl font-bold mb-6 text-gray-700">
               CPU Real-Time Monitoring
@@ -111,8 +141,8 @@ function App() {
             </div>
           </div>
 
-          {/* Docker コンテナエリア */}
-          <div className="bg-white rounded-2xl shadow-lg p-6">
+          {/* 3. Docker コンテナステータスエリア */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
             <h2 className="text-2xl font-bold mb-6 text-gray-700">
               Docker Containers
             </h2>
@@ -144,6 +174,24 @@ function App() {
                 ))
               ) : (
                 <p className="text-gray-500">No Docker containers found.</p>
+              )}
+            </div>
+          </div>
+
+          {/* 4. リアルタイム Docker ログストリーミングエリア */}
+          <div className="bg-black rounded-2xl shadow-lg p-6">
+            <h2 className="text-2xl font-bold mb-6 text-green-400">
+              Real-Time Docker Logs
+            </h2>
+            <div className="font-mono text-sm text-green-300 space-y-1 max-h-96 overflow-y-auto bg-neutral-900 p-4 rounded-xl">
+              {logs.length > 0 ? (
+                logs.map((log, index) => (
+                  <div key={index} className="whitespace-pre-wrap break-all">
+                    {log}
+                  </div>
+                ))
+              ) : (
+                <p className="text-gray-500 italic">Waiting for container logs...</p>
               )}
             </div>
           </div>
