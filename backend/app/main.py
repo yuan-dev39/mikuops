@@ -40,15 +40,15 @@ def get_system_info():
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
 
-    # ---- 【データベースへの保存処理】 ----
+    # ---- データベースへの保存処理 ----
     db = SessionLocal()  # データベースセッションを開始
     try:
-        # 新しいメトリクスデータオブジェクトを作成
+        # 新しいメトリクスデータオブジェクトを作成（時間はmodelsのdefaultで自動挿入）
         metric = Metric(
-    cpu=cpu_usage,
-    memory=memory.percent,
-    disk=disk.percent,
-)
+            cpu=cpu_usage,
+            memory=memory.percent,
+            disk=disk.percent,
+        )
         db.add(metric)  # データをセッションに追加
         db.commit()  # データベースへの変更を確定（コミット）
         db.refresh(metric)  # 挿入されたデータを最新状態に同期
@@ -109,7 +109,6 @@ def get_docker_containers():
 def health_check():
     """対象となる外部サービス（Nginxなど）にHTTPリクエストを送り、死活監視を行うAPI"""
     targets = [{"name": "Nginx", "url": "http://127.0.0.1:8080"}]
-
     results = []
 
     for target in targets:
@@ -127,36 +126,39 @@ def health_check():
 
     return results
 
-# 5. 監視履歴取得API
+
+# 4. 監視履歴取得API（指定位置：@app.get("/api/health")の下に配置）
 @app.get("/api/history")
 def get_history():
-    """保存された監視データの最新50件を取得"""
-
-    db = SessionLocal()
+    """データベースから直近100件のメトリクス履歴を取得するAPI"""
+    db = SessionLocal()  # データベースセッションを開始
 
     try:
-        data = (
+        # IDの降順で直近100件を取得
+        metrics = (
             db.query(Metric)
             .order_by(Metric.id.desc())
-            .limit(50)
+            .limit(100)
             .all()
         )
 
-        return [
-            {
+        result = []
+        # フロントエンド表示用に時系列（古い順）に並び替えてフォーマット化
+        for item in reversed(metrics):
+            result.append({
                 "cpu": item.cpu,
                 "memory": item.memory,
                 "disk": item.disk,
-                "time": item.timestamp.strftime("%H:%M:%S")
-            }
-            for item in reversed(data)
-        ]
+                "time": item.created_at.strftime("%H:%M:%S")
+            })
+
+        return result
 
     finally:
-        db.close()
+        db.close()  # セッションを確実に閉じる
 
 
-# 4. WebSocketによるリアルタイムログ配信（イベントループをブロックしない非同期最適化版）
+# 5. WebSocketによるリアルタイムログ配信（イベントループをブロックしない非同期最適化版）
 @app.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):
     """Dockerコンテナ(nginx-test)のログをリアルタイムにストリーミング配信するWebSocketエンドポイント"""

@@ -9,77 +9,88 @@ import {
 } from "recharts";
 
 function App() {
+  // システム監視情報
   const [systemInfo, setSystemInfo] = useState<any>(null);
+
+  // CPU履歴データ
   const [cpuHistory, setCpuHistory] = useState<any[]>([]);
+
+  // Dockerコンテナ一覧
   const [containers, setContainers] = useState<any[]>([]);
+
+  // 死活監視結果
+  const [healthChecks, setHealthChecks] = useState<any[]>([]);
+
+  // Dockerログ
   const [logs, setLogs] = useState<string[]>([]);
 
-  // システム監視データおよびDockerコンテナ一覧を取得する関数
+  // バックエンドAPIから監視情報を取得
   const fetchSystemInfo = () => {
-    // 1. システムリソース情報の取得
+    // システム情報取得
     fetch("http://127.0.0.1:8000/api/system")
       .then((res) => res.json())
       .then((data) => {
         setSystemInfo(data);
-
-        // CPU履歴チャートの更新（直近10回分のデータを保持）
-        setCpuHistory((prev) => {
-          const newData = [
-            ...prev,
-            {
-              time: new Date().toLocaleTimeString(),
-              cpu: data.cpu_percent,
-            },
-          ];
-          return newData.slice(-10);
-        });
       })
       .catch((err) => console.error("System API Error:", err));
 
-    // 2. Dockerコンテナ一覧の取得
+    // DB保存済み履歴データ取得
+    fetch("http://127.0.0.1:8000/api/history")
+      .then((res) => res.json())
+      .then((history) => {
+        setCpuHistory(history);
+      })
+      .catch((err) => console.error("History API Error:", err));
+
+    // Dockerコンテナ一覧取得
     fetch("http://127.0.0.1:8000/api/docker")
       .then((res) => res.json())
       .then((dockerData) => {
         setContainers(dockerData);
       })
       .catch((err) => console.error("Docker API Error:", err));
+
+    // 外部サービス死活監視取得
+    fetch("http://127.0.0.1:8000/api/health")
+      .then((res) => res.json())
+      .then((healthData) => {
+        setHealthChecks(healthData);
+      })
+      .catch((err) => console.error("Health API Error:", err));
   };
 
   useEffect(() => {
-    // 初回レンダリング時にデータを取得
+    // 初回ロード時実行
     fetchSystemInfo();
 
-    // 3秒ごとにデータを定期更新（ポーリング）
+    // 3秒ごとに監視情報更新
     const interval = setInterval(fetchSystemInfo, 3000);
 
-    // WebSocket接続の初期化（無限接続バグ防止のためuseEffect内に配置）
+    // DockerログWebSocket接続
     const ws = new WebSocket("ws://127.0.0.1:8000/ws/logs");
 
-    // バックエンドからログを受信したときの処理
     ws.onmessage = (event) => {
-      // 直近の20行のログを画面に保持
-      setLogs((prev) => [...prev, event.data].slice(-20));
+      setLogs((prev) => [...prev, event.data].slice(-50));
     };
 
-    // コンポーネントがアンマウント（破棄）されたときのクリーンアップ処理
     return () => {
       clearInterval(interval);
-      ws.close(); // WebSocket接続を正しく切断
+      ws.close();
     };
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-100 p-10">
-      <h1 className="text-4xl font-bold mb-8 text-gray-800">
+    <div className="min-h-screen bg-gray-100 p-8">
+      <h1 className="text-5xl font-bold mb-8 text-gray-800">
         MikuOps Dashboard
       </h1>
 
       {systemInfo && (
         <>
-          {/* 0. アラート表示エリア（バックエンドからの警告/危険を日本語で検知） */}
+          {/* アラート表示エリア */}
           {systemInfo.alert && (
             <div
-              className={`mb-8 p-6 rounded-2xl shadow-lg text-white text-xl font-bold ${
+              className={`mb-8 p-5 rounded-2xl shadow-lg text-white text-xl font-bold ${
                 systemInfo.status === "critical"
                   ? "bg-red-600"
                   : "bg-yellow-500"
@@ -89,7 +100,7 @@ function App() {
             </div>
           )}
 
-          {/* 1. システム監視メトリクスカード */}
+          {/* システム監視カード */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h2 className="text-xl font-semibold text-gray-600 mb-4">
@@ -119,13 +130,14 @@ function App() {
             </div>
           </div>
 
-          {/* 2. CPUリアルタイムモニタリングチャート */}
+          {/* CPU履歴グラフ */}
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
             <h2 className="text-2xl font-bold mb-6 text-gray-700">
-              CPU Real-Time Monitoring
+              CPU Real-Time Monitoring (Persistent)
             </h2>
+
             <div style={{ width: "100%", height: 300 }}>
-              <ResponsiveContainer>
+              <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={cpuHistory}>
                   <XAxis dataKey="time" />
                   <YAxis domain={[0, 100]} />
@@ -141,48 +153,81 @@ function App() {
             </div>
           </div>
 
-          {/* 3. Docker コンテナステータスエリア */}
+          {/* サービス死活監視 */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
+            <h2 className="text-2xl font-bold mb-6 text-gray-700">
+              Service Health Check
+            </h2>
+
+            <div className="space-y-4">
+              {healthChecks.map((service, index) => (
+                <div
+                  key={index}
+                  className="border rounded-xl p-4 flex justify-between items-center"
+                >
+                  <div>
+                    <p className="font-bold text-lg">{service.name}</p>
+                  </div>
+
+                  <div className="flex gap-4 items-center">
+                    <span
+                      className={`px-4 py-2 rounded-full text-white ${
+                        service.status === "UP"
+                          ? "bg-green-500"
+                          : "bg-red-500"
+                      }`}
+                    >
+                      {service.status}
+                    </span>
+
+                    <span className="font-bold text-gray-700">
+                      HTTP {service.code}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Dockerコンテナ監視 */}
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
             <h2 className="text-2xl font-bold mb-6 text-gray-700">
               Docker Containers
             </h2>
+
             <div className="space-y-4">
-              {containers.length > 0 ? (
-                containers.map((container, index) => (
-                  <div
-                    key={index}
-                    className="border rounded-xl p-4 flex justify-between items-center"
-                  >
-                    <div>
-                      <p className="font-bold text-lg">{container.name}</p>
-                      <p className="text-gray-500">
-                        {container.image?.[0] || "Unknown Image"}
-                      </p>
-                    </div>
-                    <div>
-                      <span
-                        className={`px-4 py-2 rounded-full text-white ${
-                          container.status === "running"
-                            ? "bg-green-500"
-                            : "bg-red-500"
-                        }`}
-                      >
-                        {container.status}
-                      </span>
-                    </div>
+              {containers.map((container, index) => (
+                <div
+                  key={index}
+                  className="border rounded-xl p-4 flex justify-between items-center"
+                >
+                  <div>
+                    <p className="font-bold text-lg">{container.name}</p>
+                    <p className="text-gray-500">
+                      {container.image?.[0] || "Unknown"}
+                    </p>
                   </div>
-                ))
-              ) : (
-                <p className="text-gray-500">No Docker containers found.</p>
-              )}
+
+                  <span
+                    className={`px-4 py-2 rounded-full text-white ${
+                      container.status === "running"
+                        ? "bg-green-500"
+                        : "bg-red-500"
+                    }`}
+                  >
+                    {container.status}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* 4. リアルタイム Docker ログストリーミングエリア */}
+          {/* Dockerリアルタイムログ */}
           <div className="bg-black rounded-2xl shadow-lg p-6">
             <h2 className="text-2xl font-bold mb-6 text-green-400">
               Real-Time Docker Logs
             </h2>
+
             <div className="font-mono text-sm text-green-300 space-y-1 max-h-96 overflow-y-auto bg-neutral-900 p-4 rounded-xl">
               {logs.length > 0 ? (
                 logs.map((log, index) => (
@@ -191,7 +236,9 @@ function App() {
                   </div>
                 ))
               ) : (
-                <p className="text-gray-500 italic">Waiting for container logs...</p>
+                <p className="text-gray-500">
+                  Waiting for container logs...
+                </p>
               )}
             </div>
           </div>
