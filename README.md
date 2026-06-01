@@ -38,5 +38,5 @@ FastAPI、React、Docker、および Kubernetes で構築された、次世代�
 > Windows の PowerShell または Python でCPU負荷を意図的に高めるテスト（圧殺テスト）を実施。
 > CPU使用率が閾値（5%）を30秒間超え続けた際、Grafana のアラートステータスが `Normal` (緑) から `Firing` (赤) に自動で切り替わることを実証済みです。
 
-![Grafana Dashboard](./grafana-dashboard1.png)
+![Grafana Dashboard](./screenshots/grafana-dashboard1.png)
 *図：構築した Grafana 監視画面と、CPU負荷上昇時に作動するアラートシステム*
