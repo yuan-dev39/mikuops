@@ -18,3 +18,7 @@ FastAPI、React、Docker、および Kubernetes で構築された、次世代�
 - アラート通知
 - サービス死活監視
 - SQLite履歴保存
+
+## 📊 モニター(Dashboard)
+
+![Grafana Dashboard](./screenshots/grafana-dashboard.png)
