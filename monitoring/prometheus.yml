@@ -1,11 +1,8 @@
 global:
-  scrape_interval: 5s
+  scrape_interval: 5s # 5秒ごとにデータを取得
 
 scrape_configs:
-  - job_name: "mikuops"
-
-    metrics_path: /api/metrics
-
+  - job_name: "mikuops-backend"
+    metrics_path: "/metrics"
     static_configs:
-      - targets:
-          - host.docker.internal:8000
+      - targets: ["backend:8000"] # Dockerネットワーク内のサービス名で指定

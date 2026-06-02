@@ -1,14 +1,14 @@
 import asyncio
-from datetime import datetime  # 日時を扱うためのライブラリ
+from datetime import datetime
 
 import docker
 import psutil
 import requests
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response  # Prometheus用のレスポンスクラス
+from fastapi.responses import Response
 
-# ---- 【第②步】Prometheus監視メトリクスのインポート ----
+# Prometheus監視メトリクスのインポート
 from prometheus_client import Gauge, generate_latest
 
 # データベース設定、セッション、およびモデルのインポート
@@ -17,7 +17,7 @@ from app.models import Base, Metric
 
 app = FastAPI()
 
-# ---- 【第③步】Prometheus監視メトリクスの初期化登録 ----
+# Prometheus監視メトリクスの初期化登録
 cpu_gauge = Gauge("mikuops_cpu_usage", "CPU Usage Percent")
 memory_gauge = Gauge("mikuops_memory_usage", "Memory Usage Percent")
 disk_gauge = Gauge("mikuops_disk_usage", "Disk Usage Percent")
@@ -25,7 +25,7 @@ disk_gauge = Gauge("mikuops_disk_usage", "Disk Usage Percent")
 # アプリケーション起動時にデータベース内にすべてのテーブルを自動作成
 Base.metadata.create_all(bind=engine)
 
-# CORSミドルウェアの設定（フロントエンドのReactからのクロスドメインアクセスを許可）
+# CORSミドルウェアの設定（フロントエンドからのクロスドメインアクセスを許可）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,46 +37,42 @@ app.add_middleware(
 
 @app.get("/")
 def root():
-    """ルートエンドポイント：APIが稼働しているかの基本チェック"""
+    """ルートエンドポイント：API稼働チェック"""
     return {"message": "Welcome to MikuOps"}
 
 
-# 1. システムリソース監視API（数据库保存 ＋ Prometheus注册）
 @app.get("/api/system")
 def get_system_info():
-    """CPU、メモリ、ディスクの使用率を取得し、各種監視システムに登録・保存した上でアラート判定を行うAPI"""
+    """CPU、メモリ、ディスクの使用率を取得し、DB保存およびPrometheusへ登録するAPI"""
     cpu_usage = psutil.cpu_percent(interval=None)
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
 
-    # ---- 【第④步】Prometheusへリアルタイム値を登録 ----
+    # Prometheusへリアルタイム値を登録
     cpu_gauge.set(cpu_usage)
     memory_gauge.set(memory.percent)
     disk_gauge.set(disk.percent)
 
-    # ---- データベースへの保存処理 ----
-    db = SessionLocal()  # データベースセッションを開始
+    # データベースへの保存処理
+    db = SessionLocal()
     try:
-        # 新しいメトリクスデータオブジェクトを作成（時間はmodelsのdefaultで自動挿入）
         metric = Metric(
             cpu=cpu_usage,
             memory=memory.percent,
             disk=disk.percent,
         )
-        db.add(metric)  # データをセッションに追加
-        db.commit()  # データベースへの変更を確定（コミット）
-        db.refresh(metric)  # 挿入されたデータを最新状態に同期
+        db.add(metric)
+        db.commit()
+        db.refresh(metric)
     except Exception as e:
-        # データベース書き込み失敗時のエラーログ出力
         print(f"データベースの保存に失敗しました: {str(e)}")
     finally:
-        db.close()  # セッションを確実に閉じ、コネクションリークを防止
+        db.close()
 
-    # アラート判定ロジック
+    # アラート判定ロジック（デモ用に低めの閾値に設定）
     status = "normal"
     alert = None
 
-    # テスト用（検証しやすいよう低めの閾値で判定）
     if cpu_usage >= 10:
         status = "critical"
         alert = "CPU使用率が非常に高くなっています（危険）"
@@ -93,11 +89,11 @@ def get_system_info():
     }
 
 
-# 2. Dockerコンテナ一覧取得API
 @app.get("/api/docker")
 def get_docker_containers():
-    """ローカルで稼働・停止しているすべてのDockerコンテナのステータスを取得するAPI"""
+    """すべてのDockerコンテナのステータスを取得するAPI"""
     try:
+        # Dockerデーモンへの接続（Docker Compose環境内）
         client = docker.from_env()
         containers = client.containers.list(all=True)
         result = []
@@ -118,11 +114,11 @@ def get_docker_containers():
         return {"error": f"Dockerへの接続に失敗しました: {str(e)}"}
 
 
-# 3. 外部サービス外部ヘルスチェックAPI
 @app.get("/api/health")
 def health_check():
-    """対象となる外部サービス（Nginxなど）にHTTPリクエストを送り、死活監視を行うAPI"""
-    targets = [{"name": "Nginx", "url": "http://127.0.0.1:8080"}]
+    """Docker Compose内部のNginxサービスに対してHTTPリクエストを送り、死活監視を行うAPI"""
+    # ターゲットをホスト名「nginx」に変更（Dockerネットワーク内の名前解決）
+    targets = [{"name": "Nginx", "url": "http://mikuops-nginx"}]
     results = []
 
     for target in targets:
@@ -141,24 +137,20 @@ def health_check():
     return results
 
 
-# ---- 【第⑤步】Prometheus Exporter エンドポイント ----
-@app.get("/api/metrics")
+@app.get("/metrics")
 def metrics():
-    """Prometheusサーバーがデータをスクレイピングするための標準メトリクス出力API"""
+    """Prometheusサーバーがデータをスクレイピングするための標準エンドポイント"""
     return Response(
         generate_latest(),
         media_type="text/plain"
     )
 
 
-# 4. 監視履歴取得API
 @app.get("/api/history")
 def get_history():
     """データベースから直近100件のメトリクス履歴を取得するAPI"""
-    db = SessionLocal()  # データベースセッションを開始
-
+    db = SessionLocal()
     try:
-        # IDの降順で直近100件を取得
         metrics = (
             db.query(Metric)
             .order_by(Metric.id.desc())
@@ -167,7 +159,6 @@ def get_history():
         )
 
         result = []
-        # フロントエンド表示用に時系列（古い順）に並び替えてフォーマット化
         for item in reversed(metrics):
             result.append({
                 "cpu": item.cpu,
@@ -175,22 +166,20 @@ def get_history():
                 "disk": item.disk,
                 "time": item.created_at.strftime("%H:%M:%S")
             })
-
         return result
-
     finally:
-        db.close()  # セッションを確実に閉じる
+        db.close()
 
 
-# 5. WebSocketによるリアルタイムログ配信（イベントループをブロックしない非同期最適化版）
 @app.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):
-    """Dockerコンテナ(nginx-test)のログをリアルタイムにストリーミング配信するWebSocketエンドポイント"""
+    """mikuops-nginxコンテナのログをリアルタイムにストリーミング配信するWebSocketエンドポイント"""
     await websocket.accept()
 
     def get_container_logs():
         client = docker.from_env()
-        container = client.containers.get("nginx-test")
+        # ターゲットをコンテナ名「mikuops-nginx」に指定
+        container = client.containers.get("mikuops-nginx")
         return container.logs(stream=True, follow=True, tail=100)
 
     try:
@@ -211,6 +200,6 @@ async def websocket_logs(websocket: WebSocket):
             await asyncio.sleep(0.05)
 
     except Exception as e:
-        await websocket.send_text(f"エラーが発生しました: {str(e)}")
+        await websocket.send_text(f"ログの取得中にエラーが発生しました: {str(e)}")
     finally:
         await websocket.close()

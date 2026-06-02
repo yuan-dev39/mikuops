@@ -9,70 +9,65 @@ import {
 } from "recharts";
 
 function App() {
-  // システム監視情報
+  // システム監視情報ステート
   const [systemInfo, setSystemInfo] = useState<any>(null);
-
-  // CPU履歴データ
+  // CPU履歴データステート
   const [cpuHistory, setCpuHistory] = useState<any[]>([]);
-
-  // Dockerコンテナ一覧
+  // Dockerコンテナ一覧ステート
   const [containers, setContainers] = useState<any[]>([]);
-
-  // 死活監視結果
+  // 死活監視結果ステート
   const [healthChecks, setHealthChecks] = useState<any[]>([]);
-
-  // Dockerログ
+  // Dockerログステート
   const [logs, setLogs] = useState<string[]>([]);
 
-  // バックエンドAPIから監視情報を取得
+  // 実行環境に応じたAPIベースURLの動的決定
+  const host = window.location.hostname;
+  const API_BASE = `http://${host}:8000`;
+  const WS_BASE = `ws://${host}:8000`;
+
+  // バックエンドAPIから各監視情報を一括取得する関数
   const fetchSystemInfo = () => {
-    // システム情報取得
-    fetch("http://127.0.0.1:8000/api/system")
+    // 1. システム情報取得
+    fetch(`${API_BASE}/api/system`)
       .then((res) => res.json())
-      .then((data) => {
-        setSystemInfo(data);
-      })
+      .then((data) => setSystemInfo(data))
       .catch((err) => console.error("System API Error:", err));
 
-    // DB保存済み履歴データ取得
-    fetch("http://127.0.0.1:8000/api/history")
+    // 2. DB保存済み履歴データ取得
+    fetch(`${API_BASE}/api/history`)
       .then((res) => res.json())
-      .then((history) => {
-        setCpuHistory(history);
-      })
+      .then((history) => setCpuHistory(history))
       .catch((err) => console.error("History API Error:", err));
 
-    // Dockerコンテナ一覧取得
-    fetch("http://127.0.0.1:8000/api/docker")
+    // 3. Dockerコンテナ一覧取得
+    fetch(`${API_BASE}/api/docker`)
       .then((res) => res.json())
-      .then((dockerData) => {
-        setContainers(dockerData);
-      })
+      .then((dockerData) => setContainers(dockerData))
       .catch((err) => console.error("Docker API Error:", err));
 
-    // 外部サービス死活監視取得
-    fetch("http://127.0.0.1:8000/api/health")
+    // 4. 外部サービス死活監視取得
+    fetch(`${API_BASE}/api/health`)
       .then((res) => res.json())
-      .then((healthData) => {
-        setHealthChecks(healthData);
-      })
+      .then((healthData) => setHealthChecks(healthData))
       .catch((err) => console.error("Health API Error:", err));
   };
 
   useEffect(() => {
-    // 初回ロード時実行
+    // 初回ロード時にデータを取得
     fetchSystemInfo();
 
-    // 3秒ごとに監視情報更新
+    // 3秒ごとに監視情報を自動更新（ポーリング）
     const interval = setInterval(fetchSystemInfo, 3000);
 
-    // DockerログWebSocket接続
-    const ws = new WebSocket("ws://127.0.0.1:8000/ws/logs");
+    // Dockerログ取得用WebSocketの接続確立
+    const ws = new WebSocket(`${WS_BASE}/ws/logs`);
 
     ws.onmessage = (event) => {
+      // 最新の50件のログを保持
       setLogs((prev) => [...prev, event.data].slice(-50));
     };
 
+    // クリーンアップ処理
     return () => {
       clearInterval(interval);
       ws.close();
@@ -91,9 +86,7 @@ function App() {
           {systemInfo.alert && (
             <div
               className={`mb-8 p-5 rounded-2xl shadow-lg text-white text-xl font-bold ${
-                systemInfo.status === "critical"
-                  ? "bg-red-600"
-                  : "bg-yellow-500"
+                systemInfo.status === "critical" ? "bg-red-600" : "bg-yellow-500"
               }`}
             >
               🚨 {systemInfo.alert}
@@ -135,7 +128,6 @@ function App() {
             <h2 className="text-2xl font-bold mb-6 text-gray-700">
               CPU Real-Time Monitoring (Persistent)
             </h2>
-
             <div style={{ width: "100%", height: 300 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={cpuHistory}>
@@ -158,7 +150,6 @@ function App() {
             <h2 className="text-2xl font-bold mb-6 text-gray-700">
               Service Health Check
             </h2>
-
             <div className="space-y-4">
               {healthChecks.map((service, index) => (
                 <div
@@ -168,18 +159,14 @@ function App() {
                   <div>
                     <p className="font-bold text-lg">{service.name}</p>
                   </div>
-
                   <div className="flex gap-4 items-center">
                     <span
                       className={`px-4 py-2 rounded-full text-white ${
-                        service.status === "UP"
-                          ? "bg-green-500"
-                          : "bg-red-500"
+                        service.status === "UP" ? "bg-green-500" : "bg-red-500"
                       }`}
                     >
                       {service.status}
                     </span>
-
                     <span className="font-bold text-gray-700">
                       HTTP {service.code}
                     </span>
@@ -194,7 +181,6 @@ function App() {
             <h2 className="text-2xl font-bold mb-6 text-gray-700">
               Docker Containers
             </h2>
-
             <div className="space-y-4">
               {containers.map((container, index) => (
                 <div
@@ -207,12 +193,9 @@ function App() {
                       {container.image?.[0] || "Unknown"}
                     </p>
                   </div>
-
                   <span
                     className={`px-4 py-2 rounded-full text-white ${
-                      container.status === "running"
-                        ? "bg-green-500"
-                        : "bg-red-500"
+                      container.status === "running" ? "bg-green-500" : "bg-red-500"
                     }`}
                   >
                     {container.status}
@@ -227,7 +210,6 @@ function App() {
             <h2 className="text-2xl font-bold mb-6 text-green-400">
               Real-Time Docker Logs
             </h2>
-
             <div className="font-mono text-sm text-green-300 space-y-1 max-h-96 overflow-y-auto bg-neutral-900 p-4 rounded-xl">
               {logs.length > 0 ? (
                 logs.map((log, index) => (
@@ -236,9 +218,7 @@ function App() {
                   </div>
                 ))
               ) : (
-                <p className="text-gray-500">
-                  Waiting for container logs...
-                </p>
+                <p className="text-gray-500">Waiting for container logs...</p>
               )}
             </div>
           </div>
