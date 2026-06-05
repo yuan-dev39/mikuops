@@ -55,7 +55,7 @@ docker compose up --build
 各サービスへのアクセス
 コンテナが正常に起動した後、ブラウザから以下の URL にアクセスできます：
 
-Frontend (Dashboard): http://localhost:8080
+Frontend (Dashboard): http://localhost:5173
 
 Backend API (Swagger UI): http://localhost:8000/docs
 

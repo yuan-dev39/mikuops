@@ -139,12 +139,21 @@ def health_check():
 
 @app.get("/metrics")
 def metrics():
-    """Prometheusサーバーがデータをスクレイピングするための標準エンドポイント"""
+
+    cpu_usage = psutil.cpu_percent(interval=1)
+
+    memory = psutil.virtual_memory()
+
+    disk = psutil.disk_usage("/")
+
+    cpu_gauge.set(cpu_usage)
+    memory_gauge.set(memory.percent)
+    disk_gauge.set(disk.percent)
+
     return Response(
         generate_latest(),
         media_type="text/plain"
     )
-
 
 @app.get("/api/history")
 def get_history():
